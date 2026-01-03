@@ -1,147 +1,79 @@
-getgenv().Config = {
-    CameraLock = {
-        Toggled = false,
-        Smoothness = 0.1,
-        DefaultPrediction = 0.15,
-        AutoPrediction = true,
-        TargetPart = "HumanoidRootPart"
-    },
-    Settings = {
-        Keybind = Enum.KeyCode.Q
-    },
-    PredictionTable = {
-        [30] = 0.12, [40] = 0.125, [50] = 0.13, [60] = 0.135, [70] = 0.14,
-        [80] = 0.145, [90] = 0.15, [100] = 0.155, [110] = 0.16, [120] = 0.165,
-        [130] = 0.17, [140] = 0.175
-    }
-}
+local plrs = game:GetService("Players")
+local plr = plrs.LocalPlayer
+local camera = workspace.CurrentCamera
+local runService = game:GetService("RunService")
 
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local UIS = game:GetService("UserInputService")
-local Stats = game:GetService("Stats")
-local StarterGui = game:GetService("StarterGui")
+local FOV_RADIUS = 100
+local fovCircle = Drawing.new("Circle")
+fovCircle.Visible = true
+fovCircle.Thickness = 1
+fovCircle.NumSides = 64
+fovCircle.Radius = FOV_RADIUS
+fovCircle.Filled = false
+fovCircle.Transparency = 1
 
-local Camera = workspace.CurrentCamera
-local LocalPlayer = Players.LocalPlayer
-local CurrentTarget = nil
+runService.RenderStepped:Connect(function()
+    local screenCenter = camera.ViewportSize / 2
+    fovCircle.Position = Vector2.new(screenCenter.X, screenCenter.Y)
+    fovCircle.Color = Color3.fromHSV(tick() % 5 / 5, 1, 1)
+end)
 
---// Notification Function
-local function Notify(title, text)
-     StarterGui:SetCore("SendNotification", {
-        Title = title;
-        Text = text;
-        Duration = 2;
-    })
-end
-
---// UI Setup
-local screenGui = Instance.new("ScreenGui", game.CoreGui)
-local button = Instance.new("TextButton", screenGui)
-local ui = Instance.new("UICorner", button)
-
-button.Size = UDim2.new(0, 200, 0, 50)
-button.Position = UDim2.new(0, 10, 0, 10)
-button.Font = Enum.Font.GothamBlack
-button.TextScaled = true
-button.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-button.Active = true
-button.Draggable = true
-
-ui.CornerRadius = UDim.new(0, 5)
-
---// Logic for Toggling (Shared between Keybind and Button)
-local function ToggleLock()
-    getgenv().Config.CameraLock.Toggled = not getgenv().Config.CameraLock.Toggled
-    
-    if getgenv().Config.CameraLock.Toggled then
-        local target = getClosestPlayer()
-        if target then
-            Notify("Targeting", target.DisplayName)
-        else
-            Notify("ProjectBanana", "No target found nearby")
-        end
-    else
-        if CurrentTarget then
-            Notify("Untargeting", CurrentTarget.Name .. " (Bozo)")
-        end
+local function notBehindWall(target)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {plr.Character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    local direction = (target.Position - camera.CFrame.Position)
+    local result = workspace:Raycast(camera.CFrame.Position, direction, raycastParams)
+    if not result or result.Instance:IsDescendantOf(target.Parent) then
+        return true
     end
+    return false
 end
 
---// Button Click Connection
-button.MouseButton1Click:Connect(function()
-    ToggleLock()
-end)
-
--- Rainbow Logic
-local hue = 0
-RunService.RenderStepped:Connect(function(dt)
-    hue = (hue + dt * 0.2) % 1
-    button.TextColor3 = Color3.fromHSV(hue, 0.8, 0.8)
-    button.Text = "ProjectBanana | " .. (getgenv().Config.CameraLock.Toggled and "ON" or "OFF")
-end)
-
-function getClosestPlayer()
-    local closestPlayer = nil
-    local shortestDistance = math.huge
-    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return nil end
+function getClosestPlayerToCenter()
+    local target = nil
+    local maxDist = FOV_RADIUS
+    local screenCenter = camera.ViewportSize / 2
     
-    local myPos = LocalPlayer.Character.HumanoidRootPart.Position
-    for _, player in pairs(Players:GetPlayers()) do
-        local targetPart = getgenv().Config.CameraLock.TargetPart
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(targetPart) then
-            local targetPos = player.Character[targetPart].Position
-            local distance = (myPos - targetPos).Magnitude
-            if distance < shortestDistance then
-                shortestDistance = distance
-                closestPlayer = player
+    for _, v in pairs(plrs:GetPlayers()) do
+        if v ~= plr and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
+            local head = v.Character:FindFirstChild("Head")
+            if head then
+                local pos, vis = camera:WorldToViewportPoint(head.Position)
+                if vis then
+                    local screenPos = Vector2.new(pos.X, pos.Y)
+                    local dist = (screenCenter - screenPos).Magnitude
+                    
+                    if dist < maxDist then
+                        if notBehindWall(head) then
+                            target = head
+                            maxDist = dist
+                        end
+                    end
+                end
             end
         end
     end
-    return closestPlayer
+    return target
 end
 
-local function getAutoPrediction()
-    local ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
-    local closestPing = 30
-    local minDiff = math.huge
-    for p, val in pairs(getgenv().Config.PredictionTable) do
-        local diff = math.abs(ping - p)
-        if diff < minDiff then
-            minDiff = diff
-            closestPing = p
+local gmt = getrawmetatable(game)
+setreadonly(gmt, false)
+local oldNamecall = gmt.__namecall
+
+gmt.__namecall = newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    local args = {...}
+    
+    if method == "FireServer" and tostring(self) == "HitPart" then
+        local closest = getClosestPlayerToCenter()
+        if closest then
+            args[1] = closest
+            args[2] = closest.Position
+            return oldNamecall(self, unpack(args))
         end
     end
-    return getgenv().Config.PredictionTable[closestPing]
-end
-
---// Main Camera Logic
-RunService.RenderStepped:Connect(function()
-    if not getgenv().Config.CameraLock.Toggled then 
-        CurrentTarget = nil 
-        return 
-    end
-
-    local target = getClosestPlayer()
-    local targetPartName = getgenv().Config.CameraLock.TargetPart
     
-    if target and target.Character and target.Character:FindFirstChild(targetPartName) then
-        CurrentTarget = target 
-        local part = target.Character[targetPartName]
-        local predValue = getAutoPrediction()
-        
-        local predictedPosition = part.Position + (part.Velocity * predValue)
-        local targetCFrame = CFrame.new(Camera.CFrame.Position, predictedPosition)
-        Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, getgenv().Config.CameraLock.Smoothness)
-    end
+    return oldNamecall(self, ...)
 end)
-
---// Keybind Connection
-UIS.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end 
-    if input.KeyCode == getgenv().Config.Settings.Keybind then
-        ToggleLock()
-    end
-end)
-
-Notify("ProjectBanana", "Initialized")
+setreadonly(gmt, true)
