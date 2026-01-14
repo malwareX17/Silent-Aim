@@ -1,13 +1,3 @@
---// Made by Endo / @1ay
-
---// Made by Endo / @1ay
-
---// Made by Endo / @1ay
-
---// Made by Endo / @1ay
-
---// Made by Endo / @1ay
-
 getgenv().Prediction = 0.109
 
 getgenv().ResolveKey = "C" -- Key to enable resolver 
